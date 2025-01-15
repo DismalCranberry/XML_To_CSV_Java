@@ -25,7 +25,6 @@ public class XmlToCsvConverter {
         } catch (IOException e) {
             throw new RuntimeException("Error accessing the directory or files.", e);
         }
-
     }
 
     private static void processXmlFile(String xmlFilePath, String csvFilePath) {
