@@ -1,106 +1,98 @@
-import com.andreyprodromov.csv.CsvMagikk;
-import org.w3c.dom.*;
-import javax.xml.parsers.*;
-import java.io.*;
-import java.nio.file.*;
-import java.util.stream.Stream;
+import com.opencsv.CSVWriter;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
-public class XmlToCsvConverter {
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.File;
+import java.io.FileWriter;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
-    private static final CsvMagikk CSV = new CsvMagikk();
-
+public class XMLToCSVConverter {
     public static void main(String[] args) {
-        // Directory path containing XML files
-        String inputDirectoryPath = "./xml-files"; // Change this to your input directory path
-        String outputDirectoryPath = "./converted-files"; // Output directory for converted files
+        File resFolder = new File("res");
+        File[] xmlFiles = resFolder.listFiles((_, name) -> name.toLowerCase().endsWith(".xml"));
 
-        try (Stream<Path> paths = Files.list(Paths.get(inputDirectoryPath))) {
-            paths.filter(Files::isRegularFile) // Ensure it's a file
-                    .filter(path -> path.toString().endsWith(".xml")) // Filter only .xml files
-                    .forEach(xmlFilePath -> {
-                        String outputFileName = xmlFilePath.getFileName().toString().replace(".xml", ".csv");
-                        String csvFilePath = Paths.get(outputDirectoryPath, outputFileName).toString();
-                        processXmlFile(xmlFilePath.toString(), csvFilePath);
-                    });
-        } catch (IOException e) {
-            throw new RuntimeException("Error accessing the directory or files.", e);
+        if (xmlFiles == null || xmlFiles.length == 0) {
+            System.out.println("No XML files found in the 'res' folder.");
+            return;
+        }
+
+        for (File xmlFile : xmlFiles) {
+            convertXMLToCSV(xmlFile);
         }
     }
 
-    private static void processXmlFile(String xmlFilePath, String csvFilePath) {
+    public static void convertXMLToCSV(File xmlFile) {
         try {
             // Parse the XML file
-            File inputFile = new File(xmlFilePath);
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            Document document = builder.parse(inputFile);
+            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+            Document doc = dBuilder.parse(xmlFile);
 
-            // Normalize the XML structure
-            document.getDocumentElement().normalize();
+            // Normalize XML structure
+            doc.getDocumentElement().normalize();
 
-            // Get the root element (e.g., <products>)
-            NodeList nodeList = document.getElementsByTagName("item");
+            // Prepare a list to hold the data
+            List<String[]> rows = new ArrayList<>();
 
-            // Create the CSV writer
-            BufferedWriter writer = new BufferedWriter(new FileWriter(csvFilePath));
+            // Get the list of 'item' elements
+            NodeList nodeList = doc.getElementsByTagName("item");
 
-            // Write CSV header
-            writer.write("catalog_num,nomenclature,name,manufacturer,ean,weight_kg,length_cm,width_cm,height_cm,available,price");
-            writer.newLine();
+            // Use a Set to gather unique tags for the header
+            Set<String> headerSet = new HashSet<>();
 
-            // Iterate over each <item> element in the XML
+            // Loop through each 'item' element in the XML
             for (int i = 0; i < nodeList.getLength(); i++) {
                 Node node = nodeList.item(i);
-
                 if (node.getNodeType() == Node.ELEMENT_NODE) {
                     Element element = (Element) node;
 
-                    // Extract values from XML and handle CDATA and empty elements
-                    String catalogNum = CSV.escape(getTextContentByTagName(element, "catalog_num"));
-                    String nomenclature = CSV.escape(getTextContentByTagName(element, "nomenclature"));
-                    String name = CSV.escape(getTextContentByTagName(element, "name"));
-                    String manufacturer = CSV.escape(getTextContentByTagName(element, "manufacturer"));
-                    String ean = CSV.escape(getTextContentByTagName(element, "ean"));
-                    String weight = CSV.escape(getTextContentByTagName(element, "weight_kg"));
-                    String length = CSV.escape(getTextContentByTagName(element, "length_cm"));
-                    String width = CSV.escape(getTextContentByTagName(element, "width_cm"));
-                    String height = CSV.escape(getTextContentByTagName(element, "height_cm"));
-                    String available = CSV.escape(getTextContentByTagName(element, "available"));
-                    String price = CSV.escape(getTextContentByTagName(element, "price"));
+                    // For each item, loop through its child nodes and collect the tag names
+                    NodeList childNodes = element.getChildNodes();
+                    for (int j = 0; j < childNodes.getLength(); j++) {
+                        Node childNode = childNodes.item(j);
+                        if (childNode.getNodeType() == Node.ELEMENT_NODE) {
+                            headerSet.add(childNode.getNodeName());
+                        }
+                    }
 
-                    // Write to CSV
-                    writer.write(String.join(",",
-                            catalogNum,
-                            nomenclature,
-                            name,
-                            manufacturer,
-                            ean,
-                            weight,
-                            length,
-                            width,
-                            height,
-                            available,
-                            price
-                    ));
-                    writer.newLine();
+                    // Add row to the list (order of tags will be determined dynamically later)
+                    List<String> row = new ArrayList<>();
+                    for (String tag : headerSet) {
+                        row.add(getTagValue(tag, element));
+                    }
+                    rows.add(row.toArray(String[]::new));
                 }
             }
 
-            // Close the writer
-            writer.close();
-            System.out.println("Converted " + xmlFilePath + " to " + csvFilePath);
+            // Convert Set to List and use it as header
+            String[] header = headerSet.toArray(new String[0]);
+            rows.addFirst(header); // Add the header row at the beginning
 
+            // Write the data to a CSV file
+            String csvFileName = "csv/" + xmlFile.getName().replace(".xml", ".csv");
+            CSVWriter writer = new CSVWriter(new FileWriter(csvFileName));
+            writer.writeAll(rows);
+            writer.close();
+            System.out.println("CSV file created successfully: " + csvFileName);
         } catch (Exception e) {
-            throw new RuntimeException("Error processing file: " + xmlFilePath, e);
+            System.err.println("Error processing file: " + xmlFile.getName());
+            e.printStackTrace();
         }
     }
 
-    // Helper method to get the text content of an XML element by tag name
-    private static String getTextContentByTagName(Element element, String tagName) {
-        NodeList nodes = element.getElementsByTagName(tagName);
-        if (nodes.getLength() > 0) {
-            return nodes.item(0).getTextContent().trim();
+    // Helper method to get the value of a tag
+    private static String getTagValue(String tag, Element element) {
+        NodeList nodeList = element.getElementsByTagName(tag);
+        if (nodeList.getLength() > 0) {
+            return nodeList.item(0).getTextContent();
         }
-        return "";
+        return ""; // Return empty string if tag is missing
     }
 }
